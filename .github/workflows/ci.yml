@@ -24,9 +24,46 @@ jobs:
 
       - name: Validate the plugin manifest and entry points
         run: |
-          # Omarchy isn't installed on the runner, so validate the manifest by hand.
-          python3 -c "import json; m=json.load(open('manifest.json')); assert m['entryPoints']['barWidget'] else None"
-          node -e "const m=require('./manifest.json'); if(!m.id||!m.kinds||!m.entryPoints.barWidget) process.exit(1)"
+          # Omarchy isn't installed on the runner, so mirror its validator here:
+          # required fields, a safe (relative, no "..") entry point per kind that
+          # exists, and no symlinks anywhere in the tree.
+          node - <<'NODE'
+          const fs = require("fs");
+          const path = require("path");
+          const m = JSON.parse(fs.readFileSync("manifest.json", "utf8"));
+          const entryKey = (kind) => kind === "bar-widget" ? "barWidget" : kind;
+
+          for (const k of ["id", "name", "version", "kinds", "entryPoints"])
+            if (!(k in m)) { console.error("missing required field: " + k); process.exit(1); }
+          if (!Array.isArray(m.kinds) || m.kinds.length === 0) { console.error("kinds must be a non-empty array"); process.exit(1); }
+          if (m.entryPoints === null || typeof m.entryPoints !== "object") { console.error("entryPoints must be an object"); process.exit(1); }
+          if (m.schemaVersion !== 1) { console.error("schemaVersion must be 1"); process.exit(1); }
+
+          for (const kind of m.kinds) {
+            const ep = m.entryPoints[entryKey(kind)];
+            if (typeof ep !== "string") { console.error("no entry point for kind: " + kind); process.exit(1); }
+            if (ep.startsWith("/") || ep.includes("..")) { console.error("unsafe entry point (must be a relative path): " + ep); process.exit(1); }
+            if (!fs.existsSync(path.join(process.cwd(), ep))) { console.error("entry point does not exist: " + ep); process.exit(1); }
+          }
+
+          if (m.barWidget && m.barWidget.defaultSection) {
+            const s = String(m.barWidget.defaultSection);
+            if (!["left", "center", "right"].includes(s)) { console.error("invalid barWidget.defaultSection: " + s); process.exit(1); }
+          }
+
+          // No symlinks anywhere (official validator rejects them, .git allowed).
+          const walk = (dir) => {
+            for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+              const p = path.join(dir, e.name);
+              const st = fs.lstatSync(p);
+              if (st.isSymbolicLink()) { console.error("symlink not allowed: " + p); process.exit(1); }
+              if (st.isDirectory() && e.name !== ".git") walk(p);
+            }
+          };
+          walk(".");
+
+          console.log("manifest OK");
+          NODE
 
       - name: Bash syntax check
         run: bash -n bin/vps-traffic

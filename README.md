@@ -27,8 +27,6 @@ run `omarchy-shell shell rescanPlugins`, then `omarchy plugin enable kylesean.vp
 
 Place it in the bar with `omarchy bar put kylesean.vps-traffic --after omarchy.clock`.
 
-> Also listed on [omarchyplugins.com](https://omarchyplugins.com).
-
 ## Configure
 
 Right-click the widget → **Settings** → paste the credentials:
