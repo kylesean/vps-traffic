@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# vps-traffic - query your VPS provider's official billed traffic.
+#
+# Supported providers (add a case here plus a row in omarchy/Model.js):
+#   kiwivm   BandwagonHost KiwiVM  getServiceInfo            used/total + reset
+#   vultr    Vultr Cloud Compute   GET /v2/instances/{id}    used/total + reset
+#
+# The JSON report is always the same shape: used_gb/total_gb/percent and the
+# reset timestamp. No secrets are emitted.
+# Credentials live in ~/.config/vps-traffic/<provider>/env (mode 600), or
+# expose them in the environment / point elsewhere with VPS_TRAFFIC_CONF.
+# Usage:
+#   vps-traffic [--provider <id>]           human-readable report
+#   vps-traffic [--provider <id>] --json    JSON report for the omarchy widget
+#   vps-traffic [--provider <id>] --raw     raw provider API JSON
+set -euo pipefail
+
+PROVIDER="kiwivm"
+MODE="${1:-text}"
+if [[ "${1:-}" == "--provider" ]]; then
+  if [[ $# -lt 2 ]]; then
+    echo "usage: vps-traffic [--provider <id>] [--json|--raw]" >&2
+    exit 1
+  fi
+  PROVIDER="$2"
+  MODE="${3:-text}"
+fi
+
+# Credential resolution: explicit override, then per-provider, then shared env.
+if [[ -n "${VPS_TRAFFIC_CONF:-}" ]]; then
+  CONF="$VPS_TRAFFIC_CONF"
+else
+  PER_PROVIDER="$HOME/.config/vps-traffic/$PROVIDER/env"
+  if [[ -f "$PER_PROVIDER" ]]; then
+    CONF="$PER_PROVIDER"
+  else
+    CONF="$HOME/.config/vps-traffic/env"
+  fi
+fi
+if [[ -f "$CONF" ]]; then
+  # shellcheck disable=SC1090
+  source "$CONF"
+fi
+
+case "$PROVIDER" in
+  kiwivm)
+    # BandwagonHost KiwiVM getServiceInfo. Native used/total + reset.
+    # Counters lag ~15 minutes; traffic is counted bidirectionally.
+    VEID="${KIWIVM_VEID:-}"
+    API_KEY="${KIWIVM_API_KEY:-}"
+    if [[ -z "$VEID" || -z "$API_KEY" ]]; then
+      echo "error: set KIWIVM_VEID and KIWIVM_API_KEY (env or $CONF)" >&2
+      exit 1
+    fi
+    URL="https://api.64clouds.com/v1/getServiceInfo?veid=${VEID}&api_key=${API_KEY}"
+    resp=$(curl -fsS --connect-timeout 10 -m 30 "$URL") || {
+      echo "error: KiwiVM API request failed" >&2
+      exit 1
+    }
+    if [[ "$MODE" == "--raw" ]]; then
+      printf '%s\n' "$resp"
+      exit 0
+    fi
+
+    BWG_API_RESP="$resp" python3 - "$MODE" <<'PY'
+import os, json, sys, time
+
+mode = (sys.argv[1] if len(sys.argv) > 1 else "text").lstrip("-")
+d = json.loads(os.environ.get("BWG_API_RESP", "{}"))
+if d.get("error") != 0:
+    sys.exit("API error {}: {}".format(d.get("error"), d.get("message")))
+
+def gb(n):
+    return (n or 0) / 1024 / 1024 / 1024
+
+used  = gb(d.get("data_counter"))
+total = gb(d.get("plan_monthly_data"))
+pct   = used / total * 100 if total else 0.0
+mult  = d.get("monthly_data_multiplier", 1)
+reset = d.get("data_next_reset")
+ips   = d.get("ip_addresses") or []
+now   = int(time.time())
+
+if mode == "json":
+    out = {
+        "provider": "kiwivm",
+        "fetched_at": now,
+        "hostname": d.get("hostname"),
+        "plan": d.get("plan"),
+        "location": "{} · {}".format(
+            d.get("node_location_id") or "",
+            d.get("node_location") or "",
+        ).strip(" ·"),
+        "os": d.get("os"),
+        "ip": ips[0] if ips else "",
+        "used_gb": round(used, 2),
+        "total_gb": round(total, 2),
+        "multiplier": mult,
+        "percent": round(pct, 2),
+        "next_reset": reset,
+        "next_reset_iso": time.strftime("%Y-%m-%d %H:%M %Z", time.localtime(reset)) if reset else "",
+        "suspended": bool(d.get("suspended")),
+        "metric_detail": "Bidirectional (upload + download)",
+    }
+    json.dump(out, sys.stdout)
+    sys.stdout.write("\n")
+    sys.exit(0)
+
+print("host:        {}".format(d.get("hostname")))
+print("plan:        {}  (location: {})".format(d.get("plan"), d.get("node_location_id")))
+print("used:        {:8.3f} GB".format(used))
+print("total:       {:8.3f} GB  (multiplier: {})".format(total, mult))
+print("percent:     {:6.2f}%".format(pct))
+if reset:
+    print("next reset:  {}".format(time.strftime("%Y-%m-%d %H:%M %Z", time.localtime(reset))))
+print("suspended:   {}".format(d.get("suspended")))
+print("ip:          {}".format(", ".join(ips)))
+PY
+    ;;
+
+  vultr)
+    # Vultr Cloud Compute. The instance object carries allowed_bandwidth
+    # (GB) but no "used so far" counter, so the billable usage is summed from
+    # GET /instances/{id}/bandwidth (daily incoming/outgoing bytes). Vultr:
+    #   - resets the allowance at the start of each calendar month (UTC)
+    #   - bills OUTBOUND egress; inbound is free
+    #   - allowance accrues hourly (672h/month) and is pooled account-wide
+    INSTANCE_ID="${VULTR_INSTANCE_ID:-}"
+    API_KEY="${VULTR_API_KEY:-}"
+    if [[ -z "$INSTANCE_ID" || -z "$API_KEY" ]]; then
+      echo "error: set VULTR_INSTANCE_ID and VULTR_API_KEY (env or $CONF)" >&2
+      exit 1
+    fi
+    AUTH="Authorization: Bearer ${API_KEY}"
+    instance_resp=$(curl -fsS --connect-timeout 10 -m 30 -H "$AUTH" \
+      "https://api.vultr.com/v2/instances/${INSTANCE_ID}") || {
+      echo "error: Vultr instance request failed" >&2
+      exit 1
+    }
+    bw_resp=$(curl -fsS --connect-timeout 10 -m 30 -H "$AUTH" \
+      "https://api.vultr.com/v2/instances/${INSTANCE_ID}/bandwidth?date_range=31") || {
+      echo "error: Vultr bandwidth request failed" >&2
+      exit 1
+    }
+    if [[ "$MODE" == "--raw" ]]; then
+      printf '{ "instance": %s, "bandwidth": %s }\n' "$instance_resp" "$bw_resp"
+      exit 0
+    fi
+
+    VULTR_INSTANCE_RESP="$instance_resp" VULTR_BANDWIDTH_RESP="$bw_resp" \
+      python3 - "$MODE" <<'PY'
+import os, json, sys, time, calendar
+
+mode = (sys.argv[1] if len(sys.argv) > 1 else "text").lstrip("-")
+inst = (json.loads(os.environ.get("VULTR_INSTANCE_RESP", "{}")) or {}).get("instance") or {}
+bw   = (json.loads(os.environ.get("VULTR_BANDWIDTH_RESP", "{}")) or {}).get("bandwidth") or {}
+
+def gb(n):
+    return (n or 0) / 1024 / 1024 / 1024
+
+# allowed_bandwidth is already in GB (integer), unlike the KiB-from-bytes
+# KiwiVM counter, so do not convert.
+total = float(inst.get("allowed_bandwidth") or 0)
+
+now = int(time.time())
+tm = time.gmtime(now)
+prefix = "%04d-%02d-" % (tm.tm_year, tm.tm_mon)
+out_bytes = 0
+for day, counts in bw.items():
+    if isinstance(counts, dict) and str(day).startswith(prefix):
+        out_bytes += counts.get("outgoing_bytes") or 0
+
+used = gb(out_bytes)          # billable egress for the current month
+pct  = used / total * 100 if total else 0.0
+
+# Next reset = 00:00 UTC on the 1st of the following month.
+ny, nm = (tm.tm_year + 1, 1) if tm.tm_mon == 12 else (tm.tm_year, tm.tm_mon + 1)
+next_reset = calendar.timegm((ny, nm, 1, 0, 0, 0))
+
+if mode == "json":
+    out = {
+        "provider": "vultr",
+        "fetched_at": now,
+        "hostname": inst.get("hostname") or inst.get("label") or "",
+        "plan": inst.get("plan") or "",
+        "location": inst.get("region") or "",
+        "os": inst.get("os") or "",
+        "ip": inst.get("main_ip") or "",
+        "used_gb": round(used, 2),
+        "total_gb": round(total, 2),
+        "multiplier": 1,
+        "percent": round(pct, 2),
+        "next_reset": next_reset,
+        "next_reset_iso": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(next_reset)),
+        "suspended": False,
+        "metric_detail": "Outbound egress · inbound is free",
+    }
+    json.dump(out, sys.stdout)
+    sys.stdout.write("\n")
+    sys.exit(0)
+
+print("host:        {}".format(inst.get("hostname") or inst.get("label")))
+print("plan:        {}  (region: {})".format(inst.get("plan"), inst.get("region")))
+print("used:        {:8.3f} GB".format(used))
+print("total:       {:8.3f} GB".format(total))
+print("percent:     {:6.2f}%".format(pct))
+print("next reset:  {}".format(time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(next_reset))))
+print("ip:          {}".format(inst.get("main_ip")))
+print("note:        outbound egress in the current month; inbound is free")
+PY
+    ;;
+
+  *)
+    echo "error: unsupported provider '$PROVIDER' (supported: kiwivm, vultr)" >&2
+    exit 1
+    ;;
+esac

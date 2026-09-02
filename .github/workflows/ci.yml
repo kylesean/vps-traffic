@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node (model contract tests)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Python + bash shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck python3
+
+      - name: Validate the plugin manifest and entry points
+        run: |
+          # Omarchy isn't installed on the runner, so validate the manifest by hand.
+          python3 -c "import json; m=json.load(open('manifest.json')); assert m['entryPoints']['barWidget'] else None"
+          node -e "const m=require('./manifest.json'); if(!m.id||!m.kinds||!m.entryPoints.barWidget) process.exit(1)"
+
+      - name: Bash syntax check
+        run: bash -n bin/vps-traffic
+
+      - name: Shellcheck the CLI
+        run: shellcheck bin/vps-traffic
+
+      - name: Model contract tests
+        run: node omarchy/model.test.mjs
+
+      - name: Python helper scripts compile
+        run: |
+          node - <<'NODE'
+          const fs=require('fs');
+          const src=fs.readFileSync('omarchy/SettingsView.qml','utf8');
+          function extract(p){const st=src.indexOf('readonly property string '+p+': ');const o=src.indexOf('[',st);let d=0,e=-1;for(let i=o;i<src.length;i++){if(src[i]==='[')d++;else if(src[i]===']'){d--;if(d===0){e=i;break;}}}const a=src.slice(o,e+1);const it=[];const re=/"((?:[^"\\]|\\.)*)"/g;let x;while((x=re.exec(a)))it.push(JSON.parse('"'+x[1]+'"'));return it.join('\n');}
+          fs.writeFileSync('/tmp/rs.py',extract('readScript'));
+          fs.writeFileSync('/tmp/ws.py',extract('writeScript'));
+          NODE
+          python3 -m py_compile /tmp/rs.py /tmp/ws.py
+
+      - name: CLI contract (unsupported provider fails, missing creds fails)
+        run: |
+          set +e
+          bin/vps-traffic --provider not-a-provider --json
+          [ $? -ne 0 ] || { echo "expected failure for unknown provider"; exit 1; }
+          VPS_TRAFFIC_CONF=/nonexistent bin/vps-traffic --provider vultr --json 2>/dev/null
+          [ $? -ne 0 ] || { echo "expected failure for missing creds"; exit 1; }

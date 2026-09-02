@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "id": "kylesean.vps-traffic",
+  "name": "VPS Traffic",
+  "version": "1.0.0",
+  "author": "kylesean",
+  "license": "MIT",
+  "homepage": "https://github.com/kylesean/vps-traffic",
+  "repository": "https://github.com/kylesean/vps-traffic",
+  "description": "Official billed bandwidth usage of your proxy VPS — used/total, progress and reset countdown in the Omarchy bar. BandwagonHost KiwiVM and Vultr today, open to more panels.",
+  "keywords": [
+    "network",
+    "bandwidth",
+    "vps",
+    "traffic",
+    "quota",
+    "kiwivm"
+  ],
+  "kinds": [
+    "bar-widget"
+  ],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "omarchy/BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "VPS Traffic",
+    "description": "Official bandwidth counter, usage progress and reset countdown for your VPS (BandwagonHost KiwiVM).",
+    "category": "Network",
+    "aliases": [
+      "vps-traffic",
+      "traffic",
+      "quota"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "provider": "kiwivm",
+      "refreshIntervalSec": 300,
+      "warnPercent": 80,
+      "criticalPercent": 95,
+      "showPercent": true,
+      "showHost": false
+    },
+    "schema": [
+      {
+        "key": "provider",
+        "type": "enum",
+        "label": "Provider",
+        "options": [
+          "kiwivm",
+          "vultr"
+        ],
+        "description": "Which provider backend to fetch. Selected in the panel settings or cycled with middle-click; new backends join the registry.",
+        "defaultValue": "kiwivm"
+      },
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "description": "How often to query the KiwiVM API. Note KiwiVM counters lag ~15 minutes behind real usage.",
+        "min": 30,
+        "max": 3600,
+        "step": 30,
+        "defaultValue": 300
+      },
+      {
+        "key": "warnPercent",
+        "type": "integer",
+        "label": "Warn at usage %",
+        "description": "Highlight the bar when used traffic reaches this percentage.",
+        "min": 10,
+        "max": 99,
+        "defaultValue": 80
+      },
+      {
+        "key": "criticalPercent",
+        "type": "integer",
+        "label": "Critical at usage %",
+        "description": "Highlight the bar as urgent when used traffic reaches this percentage.",
+        "min": 11,
+        "max": 100,
+        "defaultValue": 95
+      },
+      {
+        "key": "showPercent",
+        "type": "boolean",
+        "label": "Show usage percentage",
+        "description": "Show the used percentage next to the icon in the top bar.",
+        "defaultValue": true
+      },
+      {
+        "key": "showHost",
+        "type": "boolean",
+        "label": "Show VPS hostname",
+        "description": "Show the VPS hostname before the percentage.",
+        "defaultValue": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+# Credentials are stored outside the repo (~/.config/vps-traffic/), never here.
+# Defence in depth: refuse any stray env that carries a key.
+.env
+*.env
+
+# Local screenshots (real hostname/IP in them) stay out of the tree.
+screenshots/
+
+# OS / editor / tooling noise
+.DS_Store
+*.log
+node_modules/
+tmp/
+.vscode/
+.idea/
