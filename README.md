@@ -38,14 +38,19 @@ Requires `curl` and `python3` (both present on Omarchy).
 
 ### 1. Add the plugin
 
+The canonical way is a git URL — Omarchy clones it into
+`~/.config/omarchy/plugins/<id>/` (plugins run as unsandboxed code in the shell,
+so review the source first):
+
 ```bash
-# TODO: replace with your repository URL before publishing
-git clone https://github.com/<your-username>/vps-traffic ~/.config/omarchy/plugins/kylesean.vps-traffic
+omarchy plugin add https://github.com/kylesean/vps-traffic --enable
 ```
 
-or copy this folder to `~/.config/omarchy/plugins/kylesean.vps-traffic/`.
+Or install by hand: drop this folder into
+`~/.config/omarchy/plugins/kylesean.vps-traffic/`, run
+`omarchy-shell shell rescanPlugins`, then enable it.
 
-### 2. Add your KiwiVM credentials
+### 2. Add your provider credentials
 
 **Easiest: right-click the widget in the bar → paste VEID and API key in the
 settings panel.** The key is written to `~/.config/vps-traffic/<provider>/env`
@@ -70,16 +75,18 @@ chmod 600 ~/.config/vps-traffic/env
 Alternatively export `KIWIVM_VEID` / `KIWIVM_API_KEY`, or point the script
 elsewhere with `VPS_TRAFFIC_CONF=/path/to/env`.
 
-### 3. Enable the widget in your bar
+### 3. Place it in your bar
 
 ```bash
-omarchy plugin enable kylesean.vps-traffic
-omarchy bar put kylesean.vps-traffic --after akitaonrails.ai-usagebar
+omarchy bar put kylesean.vps-traffic --after omarchy.clock
 ```
 
 The shell hot-reloads `shell.json` on save, so the widget appears
 immediately. Verify with `omarchy plugin list` and
 `omarchy plugin validate .`.
+
+> It's also listed on [omarchyplugins.com](https://omarchyplugins.com), the
+> community directory of Omarchy shell plugins.
 
 ## Configuration
 
@@ -140,6 +147,26 @@ The plugin bundles the same script as a standalone CLI:
 
 The widget emits no secrets: the JSON report only carries the hostname, plan,
 location, OS, IP, counters, reset timestamp and suspended flag.
+
+## Security
+
+Plugins run as unsandboxed code inside `omarchy-shell`, so this widget is kept
+deliberately narrow:
+
+- **Network** is limited to the provider's upstream API only (KiwiVM
+  `getServiceInfo`, Vultr `/instances` + `/bandwidth`). Nothing else is called.
+- **Credentials** live at `~/.config/vps-traffic/<provider>/env` (mode 600,
+  atomic write). The settings helper passes them to `python3` over stdin with a
+  deliberate `os.read` loop (Quickshell never closes stdin), so they never appear
+  in the process list via the helper. The provider APIs authenticate via query
+  string, so the key is briefly visible in `ps` during each poll — inherent to
+  those endpoints.
+- **Untrusted data** (hostname, plan, API error text) is sanitized at render
+  time (`Model.autoTextSafe`); counters are type-checked before arithmetic
+  (`typeof === "number"`) and the provider id is passed to the CLI as its own
+  argv element, never interpolated into a shell string.
+- No secrets are committed; the repo is validated with
+  `node omarchy/model.test.mjs` and `omarchy plugin validate .`.
 
 ## Development
 
