@@ -1,9 +1,11 @@
 # VPS Traffic
 
+**[English](README.md)** | **[简体中文](README_zh.md)**
+
 Native [Omarchy](https://omarchy.org/) bar widget that shows your VPS provider's
 **official billed bandwidth** — used / total, percent, and reset countdown.
 
-Built for [BandwagonHost](https://bandwagonhost.com/) KiwiVM and [Vultr](https://www.vultr.com/).
+Built for [BandwagonHost](https://bandwagonhost.com/) KiwiVM, with reference support for [Vultr](https://www.vultr.com/).
 
 ## Features
 
@@ -12,31 +14,34 @@ Built for [BandwagonHost](https://bandwagonhost.com/) KiwiVM and [Vultr](https:/
 - Colour carries the state: calm → yellow past 80% → red past 95% or when suspended
 - Click for a panel with the usage meter, plan / location / OS / IP
 - Configurable refresh interval; **middle-click** switches provider
-- Zero dependencies: one `curl` + `python3` script, pure-JS report model
+- Zero dependencies: one self-contained CLI script, pure-JS report model
 
 ## Install
 
-Requires `curl` and `python3` (both on Omarchy).
+Requires `curl` and `python3` (both standard on Omarchy).
 
 ```bash
 omarchy plugin add https://github.com/kylesean/vps-traffic --enable
 ```
 
-Or by hand: copy this folder to `~/.config/omarchy/plugins/kylesean.vps-traffic/`,
+Or manually: copy this folder to `~/.config/omarchy/plugins/kylesean.vps-traffic/`,
 run `omarchy-shell shell rescanPlugins`, then `omarchy plugin enable kylesean.vps-traffic`.
 
-Place it in the bar with `omarchy bar put kylesean.vps-traffic --after omarchy.clock`.
+Place it in the bar with:
+```bash
+omarchy bar put kylesean.vps-traffic --after omarchy.clock
+```
 
 ## Configure
 
 Right-click the widget → **Settings** → paste the credentials:
-`VEID` + `API key` (KiwiVM) or `Instance ID` + `API key` (Vultr). They're stored
-in `~/.config/vps-traffic/<provider>/env` (mode 600), never committed.
+`VEID` + `API key` (KiwiVM) or `Instance ID` + `API key` (Vultr). They are stored
+in `~/.config/vps-traffic/<provider>/env` (mode 600) and never committed.
 
-Or by hand:
+Or manually:
 
 ```bash
-mkdir -p ~/.config/vps-traffic && chmod 700 ~/.config/vps-traffic
+mkdir -p ~/.config/vps-traffic/kiwivm && chmod 700 ~/.config/vps-traffic ~/.config/vps-traffic/kiwivm
 cat > ~/.config/vps-traffic/kiwivm/env <<'EOF'
 KIWIVM_VEID=your_veid
 KIWIVM_API_KEY=private_xxxxxxxx
@@ -63,17 +68,16 @@ Settings live inline in `~/.config/omarchy/shell.json`; set them with
 - **Wheel** — refresh now; **middle click** — switch provider
 - **R / F5** — refresh
 
-## Notes
+## Provider Notes
 
-- **KiwiVM** gives the counter directly; traffic is counted bidirectionally and
-  lags ~15 minutes behind real use.
-- **Vultr** doesn't expose a counter, so the widget sums the monthly
-  `outgoing_bytes` from `/instances/{id}/bandwidth` vs `allowed_bandwidth`.
-  Vultr bills outbound egress, marks inbound free, resets monthly, and accrues
-  hourly — so this is an approximation of the billing view.
-- Both provider APIs authenticate via query string, so the key is briefly visible
-  in `ps` each poll; the settings helper itself writes the key over stdin and
-  never puts it in the process list.
+- **BandwagonHost (KiwiVM)**: Fully verified in production. Reads the counter directly via `getServiceInfo`; traffic is counted bidirectionally and lags ~15 minutes behind real use.
+- **Vultr**: *Untested reference backend*. Retained primarily to demonstrate and preserve multi-provider extensibility. Sums monthly outbound egress from `/instances/{id}/bandwidth` against `allowed_bandwidth`. (Community testing and feedback welcome!)
+- **Security & Secrets**: KiwiVM authenticates via query parameters, whereas Vultr uses an `Authorization: Bearer` header. The settings helper writes credentials over `stdin` into isolated `mode 600` files and never passes them as command arguments, keeping them out of `ps aux`.
+
+## Roadmap & Contributing
+
+- **Official Marketplace Submission**: Once further verified and polished in daily use, this plugin will be submitted to the official [Omarchy Plugin Marketplace](https://github.com/omacom/omarchy-plugin-marketplace).
+- **Feel Free to Fork**: The functional logic is intentionally simple, modular, and lightweight. You are warmly encouraged to **fork** this repository, tailor it to your preferences, or add backends for other providers (e.g. Hetzner, DigitalOcean, Linode).
 
 ## Development
 
@@ -83,7 +87,7 @@ omarchy plugin validate .     # manifest + entry-point check
 ```
 
 Adding a provider = one row in `omarchy/Model.js` (`PROVIDERS` + credentials), one
-`case` in `bin/vps-traffic`, and an option in `manifest.json` — the UI comes free.
+`case` in `bin/vps-traffic`, and an option in `manifest.json` — the UI adapts automatically.
 
 ## License
 

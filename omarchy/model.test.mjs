@@ -51,16 +51,23 @@ test("BarWidget.qml forwards the panel lifecycle", () => {
     assert.match(barWidgetSource, new RegExp(`function\\s+${method}\\s*\\(`))
 })
 
-test("SettingsView.qml exposes the credential form", () => {
+test("SettingsView.qml exposes the credential form and delegates to CLI", () => {
   const settingsSource = fs.readFileSync(new URL("./SettingsView.qml", import.meta.url), "utf8")
   assert.match(settingsSource, /function\s+saveCredentials\s*\(/)
-  assert.match(settingsSource, /KIWIVM_VEID/)
-  assert.match(settingsSource, /mode=0o700/)
+  assert.match(settingsSource, /--creds-read/)
+  assert.match(settingsSource, /--creds-write/)
   assert.match(settingsSource, /property string provider/)
 })
 
-test("bin/vps-traffic is executable and self-contained", () => {
+test("bin/vps-traffic is executable and manages credentials with mode 0600", () => {
   assert.ok(fs.existsSync(new URL("../bin/vps-traffic", import.meta.url)))
+  const binSource = fs.readFileSync(new URL("../bin/vps-traffic", import.meta.url), "utf8")
+  assert.match(binSource, /--creds-read/)
+  assert.match(binSource, /--creds-write/)
+  assert.match(binSource, /0o700/)
+  assert.match(binSource, /0o600/)
+  assert.match(binSource, /KIWIVM_VEID/)
+  assert.match(binSource, /VULTR_INSTANCE_ID/)
 })
 
 // --- report model ----------------------------------------------------------

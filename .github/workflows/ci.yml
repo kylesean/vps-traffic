@@ -74,16 +74,19 @@ jobs:
       - name: Model contract tests
         run: node omarchy/model.test.mjs
 
-      - name: Python helper scripts compile
+      - name: CLI credentials contract tests (stdin write & mode 600 read)
         run: |
-          node - <<'NODE'
-          const fs=require('fs');
-          const src=fs.readFileSync('omarchy/SettingsView.qml','utf8');
-          function extract(p){const st=src.indexOf('readonly property string '+p+': ');const o=src.indexOf('[',st);let d=0,e=-1;for(let i=o;i<src.length;i++){if(src[i]==='[')d++;else if(src[i]===']'){d--;if(d===0){e=i;break;}}}const a=src.slice(o,e+1);const it=[];const re=/"((?:[^"\\]|\\.)*)"/g;let x;while((x=re.exec(a)))it.push(JSON.parse('"'+x[1]+'"'));return it.join('\n');}
-          fs.writeFileSync('/tmp/rs.py',extract('readScript'));
-          fs.writeFileSync('/tmp/ws.py',extract('writeScript'));
-          NODE
-          python3 -m py_compile /tmp/rs.py /tmp/ws.py
+          # Test writing credentials via stdin
+          echo '{"veid":"999999","api_key":"test_key_123"}' | bin/vps-traffic --creds-write kiwivm
+          # Test reading saved credentials
+          creds=$(bin/vps-traffic --creds-read kiwivm)
+          echo "$creds" | grep -q '"veid": "999999"' || { echo "creds-read failed"; exit 1; }
+          echo "$creds" | grep -q '"key_present": true' || { echo "key_present check failed"; exit 1; }
+          # Test file permissions (mode 600)
+          perms=$(stat -c "%a" "$HOME/.config/vps-traffic/kiwivm/env" 2>/dev/null || stat -f "%Lp" "$HOME/.config/vps-traffic/kiwivm/env")
+          [ "$perms" = "600" ] || { echo "expected mode 600, got $perms"; exit 1; }
+          # Clean up test files
+          rm -rf "$HOME/.config/vps-traffic/kiwivm"
 
       - name: CLI contract (unsupported provider fails, missing creds fails)
         run: |

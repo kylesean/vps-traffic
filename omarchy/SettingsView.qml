@@ -120,10 +120,16 @@ Column {
   property int credsWriteExitCode: -1
   property string pendingPayload: ""
 
+  readonly property string scriptPath: {
+    var url = String(Qt.resolvedUrl("../bin/vps-traffic"))
+    if (url.indexOf("file://") === 0) url = url.slice(7)
+    return url
+  }
+
   Process {
     id: credsReadProcess
     running: false
-    command: ["python3", "-c", readScript, root.provider]
+    command: ["/usr/bin/env", "bash", root.scriptPath, "--creds-read", root.provider]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.credsReadStdout = text
@@ -141,7 +147,7 @@ Column {
   Process {
     id: credsWriteProcess
     running: false
-    command: ["python3", "-c", writeScript, root.provider]
+    command: ["/usr/bin/env", "bash", root.scriptPath, "--creds-write", root.provider]
     stdinEnabled: true
     onStarted: {
       write(root.pendingPayload + "\n")
@@ -160,98 +166,6 @@ Column {
       Qt.callLater(root.finishWrite)
     }
   }
-
-  // Credential field -> env var names, kept in lockstep with Model.js. The
-  // first field is the account id (VEID / instance id), api_key is optional to
-  // re-key. `mode=0o700` for the dir, `0o600` for the file.
-  readonly property string readScript: [
-    "import json, os, sys",
-    "provider = (sys.argv[1] if len(sys.argv) > 1 else 'kiwivm')",
-    "SPECS = {",
-    "  'kiwivm': {'fields': {'veid': 'KIWIVM_VEID', 'api_key': 'KIWIVM_API_KEY'}, 'required': ['veid', 'api_key']},",
-    "  'vultr': {'fields': {'instance_id': 'VULTR_INSTANCE_ID', 'api_key': 'VULTR_API_KEY'}, 'required': ['instance_id', 'api_key']},",
-    "}",
-    "spec = SPECS.get(provider, SPECS['kiwivm'])",
-    "base = os.path.expanduser('~/.config/vps-traffic')",
-    "# Read exactly what the CLI will use: the per-provider file wins, the",
-    "# shared env is only a fallback. (A shared file must never overwrite a",
-    "# per-provider value, or the form would show stale credentials.)",
-    "chosen = None",
-    "for path in [os.path.join(base, provider, 'env'), os.path.join(base, 'env')]:",
-    "    if os.path.exists(path):",
-    "        chosen = path",
-    "        break",
-    "d = {}",
-    "if chosen is not None:",
-    "    for line in open(chosen):",
-    "        line = line.strip()",
-    "        if line and not line.startswith('#') and '=' in line:",
-    "            k, v = line.split('=', 1)",
-    "            d[k.strip()] = v.strip()",
-    "envmap = spec['fields']",
-    "out = {}",
-    "for key, envvar in envmap.items():",
-    "    out[key] = d.get(envvar, '')",
-    "out['key_present'] = bool(d.get(envmap.get('api_key', '')))",
-    "print(json.dumps(out))"
-  ].join("\n")
-
-  readonly property string writeScript: [
-    "import json, os, sys, tempfile",
-    "provider = (sys.argv[1] if len(sys.argv) > 1 else 'kiwivm')",
-    "SPECS = {",
-    "  'kiwivm': {'fields': {'veid': 'KIWIVM_VEID', 'api_key': 'KIWIVM_API_KEY'}, 'required': ['veid', 'api_key']},",
-    "  'vultr': {'fields': {'instance_id': 'VULTR_INSTANCE_ID', 'api_key': 'VULTR_API_KEY'}, 'required': ['instance_id', 'api_key']},",
-    "}",
-    "spec = SPECS.get(provider, SPECS['kiwivm'])",
-    "base = os.path.expanduser('~/.config/vps-traffic')",
-    "d = os.path.join(base, provider)",
-    "os.makedirs(d, mode=0o700, exist_ok=True)",
-    "path = os.path.join(d, 'env')",
-    "cur = {}",
-    "if os.path.exists(path):",
-    "    for line in open(path):",
-    "        line = line.strip()",
-    "        if line and not line.startswith('#') and '=' in line:",
-    "            k, v = line.split('=', 1)",
-    "            cur[k.strip()] = v.strip()",
-    "# Quickshell keeps stdin open after write(), so any read() that waits for",
-    "# EOF blocks forever. os.read(0, n) returns whatever bytes are available and",
-    "# only waits for the next chunk of data, never for EOF.",
-    "req = None",
-    "_buf = b''",
-    "for _ in range(4):",
-    "    _b = os.read(0, 65536)",
-    "    if not _b:",
-    "        break",
-    "    _buf += _b",
-    "    try:",
-    "        req = json.loads(_buf)",
-    "        break",
-    "    except ValueError:",
-    "        continue",
-    "if req is None:",
-    "    req = json.loads(_buf)",
-    "envmap = spec['fields']",
-    "for key, envvar in envmap.items():",
-    "    if req.get(key):",
-    "        cur[envvar] = str(req[key]).strip()",
-    "missing = [k for k in spec['required'] if not cur.get(envmap[k])]",
-    "if missing:",
-    "    sys.stderr.write('Missing required credential(s): %s\\n' % ', '.join(missing))",
-    "    sys.exit(1)",
-    "names = [envmap[k] for k in spec['required']]",
-    "body = '\\n'.join('%s=%s' % (n, cur[n]) for n in names) + '\\n'",
-    "fd, tmp = tempfile.mkstemp(dir=d)",
-    "try:",
-    "    os.write(fd, body.encode())",
-    "    os.close(fd)",
-    "    os.chmod(tmp, 0o600)",
-    "    os.replace(tmp, path)",
-    "except BaseException:",
-    "    os.unlink(tmp)",
-    "    raise"
-  ].join("\n")
 
   // ---- form ---------------------------------------------------------------
   PanelSectionHeader {

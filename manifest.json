@@ -25,7 +25,7 @@
   },
   "barWidget": {
     "displayName": "VPS Traffic",
-    "description": "Official bandwidth counter, usage progress and reset countdown for your VPS (BandwagonHost KiwiVM).",
+    "description": "Official bandwidth counter, usage progress and reset countdown for your VPS (BandwagonHost KiwiVM, Vultr).",
     "category": "Network",
     "aliases": [
       "vps-traffic",
