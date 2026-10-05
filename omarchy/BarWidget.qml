@@ -16,6 +16,15 @@ BarWidget {
     ? panelItem.popoutSwitchClosing === true
     : false
 
+  readonly property string barText: root.panelItem ? root.panelItem.barText() : "󰒋  …"
+  // Spec: icon-only goes through BarIconButton (Style.bar.iconFont 13px,
+  // 27px slot), readings go through WidgetButton (Style.font.body 12px).
+  readonly property bool iconOnly: root.barText.trim() === "󰒋"
+
+  function activeButton() {
+    return root.iconOnly ? iconButton : textButton
+  }
+
   function open() {
     if (panelItem) panelItem.open()
   }
@@ -45,15 +54,16 @@ BarWidget {
     if (!target) return
     if ("bar" in target) target.bar = root.bar
     if ("settings" in target) target.settings = root.settings
-    if ("anchorItem" in target) target.anchorItem = button
+    if ("anchorItem" in target) target.anchorItem = root.activeButton()
     if ("hostWidget" in target) target.hostWidget = root
   }
 
-  implicitWidth: button.implicitWidth
-  implicitHeight: button.implicitHeight
+  implicitWidth: root.activeButton().implicitWidth
+  implicitHeight: root.activeButton().implicitHeight
 
   onBarChanged: injectPanel()
   onSettingsChanged: injectPanel()
+  onIconOnlyChanged: injectPanel()
 
   Loader {
     id: panelLoader
@@ -66,15 +76,39 @@ BarWidget {
     }
   }
 
+  // Readings: text widget, aligned with clock/workspaces.
   WidgetButton {
-    id: button
+    id: textButton
     anchors.fill: parent
+    visible: !root.iconOnly
     bar: root.bar
-    text: root.panelItem ? root.panelItem.barText() : "󰒋  …"
-    fontSize: Style.font.bodySmall
+    text: root.barText
+    fontSize: Style.font.body
     active: root.panelItem ? root.panelItem.alarming : false
     tooltipText: root.panelItem ? root.panelItem.tooltipText() : "VPS traffic"
     horizontalMargin: 8.5
+
+    onPressed: function(buttonCode) {
+      if (buttonCode === Qt.RightButton) root.openSettings()
+      else if (buttonCode === Qt.MiddleButton && root.panelItem)
+        root.panelItem.nextProvider(1)
+      else root.toggle()
+    }
+
+    onWheelMoved: function(delta) {
+      if (delta !== 0) root.refresh()
+    }
+  }
+
+  // Icon-only: icon widget, aligned with audio/network/bluetooth.
+  BarIconButton {
+    id: iconButton
+    anchors.fill: parent
+    visible: root.iconOnly
+    bar: root.bar
+    text: root.barText
+    active: root.panelItem ? root.panelItem.alarming : false
+    tooltipText: root.panelItem ? root.panelItem.tooltipText() : "VPS traffic"
 
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) root.openSettings()
